@@ -70,7 +70,7 @@ The most common financial model, adopted by Google, Yahoo, and Microsoft [7], fo
 
 Three practical issues need to be resolved for ad click prediction systems to achieve good performance: sparsity, scalability and adptiveness. First, in such applications, the number of features is usually very large, resulting in high-dimensional data (examples). However, since the number of training examples is limited, logistic regression tends to overfit. A common way to reduce overfitting is through regularization, namely L1-norm and L2-norm regularization. The L2-norm regularization has the advantage of being able to reduce to a convex optimization problem that is always differentiable, while the L1-norm regularization is more attractive for dealing with high-dimensional data because it implicitly embeds feature selection in the classification process [3].
 
-The second practical issue is scalability. Scalability is important to industrial applications because of both massive data volume and massive model size [1]. A typical industrial application nowadays is required to learn and predict billions of instances with high-dimensional feature space per day [4]. Meanwhile, observations show that increasing the scale of machine learning models can significantly improve classification accuracy [5]. The most natural way to address scalability is through parallelism. A number of distributed systems specifically optimized for machine learning have emerged recently [1] [2] [5], along with some theoretical work on consistency models for distributed ML [1] [9]. We will discuss some of these systems in sections 2. For this project, we use Petuum [2], an open source large-scale ML framework currently being developed at CMU, as the centralized shared parameter server to apply iterative-convergent methods to realize regularized LR models in large scale.
+The second practical issue is scalability. Scalability is important to industrial applications because of both massive data volume and massive model size [1]. A typical industrial application nowadays is required to learn and predict billions of instances with high-dimensional feature space per day [4]. Meanwhile, observations show that increasing the scale of machine learning models can significantly improve classification accuracy [5]. The most natural way to address scalability is through parallelism. A number of distributed systems specifically optimized for machine learning have emerged recently [1] [2] [5], along with some theoretical work on consistency models for distributed ML [1] [9]. We will discuss some of these systems in sections 2. For this project, we use Petuum [2], an open source large-scale ML framework currently being developed at CMU, as the centralized shared parameter server to apply iterative-convergent methods (specifically, distributed gradient computation) to realize regularized LR models in large scale.
 
 The final practical issue to be considered is adaptiveness, which means that the existing model is periodically refined through learning of the data obtained from the recent prediction results. Adaptiveness typically requires online algorithms where data is provided by a streaming service. In other words, each training example only needs to be considered once.
 
@@ -88,7 +88,7 @@ In this section, we first present a derivation of the algorithms chosen to imple
 
 \subsection{Stochastic Gradient Ascent (Descent) for Logistic Regression}
 
-Suppose that the training set has n examples $\vec{x_1}$ to $\vec{x_n}$, each having a dimension of d. Let $y_1$ to $y_n$ denote the corresponding binary labels, i.e. $y_i \in \{0, 1\}$ for $\forall i = 1, ..., n$. The logistic function is defined as $\sigma(z) = \frac{1}{1+e^{-z}}$. The parameters associated with the LR model are $w_0$ and $\vec{w} = (w_1, ..., w_d)$. Let ($\vec{x}$, $y$) be a test sample, then we have the following probability model for logistic regression:
+The following derivation refers to [6]. Suppose that the training set has n examples $\vec{x_1}$ to $\vec{x_n}$, each having a dimension of d. Let $y_1$ to $y_n$ denote the corresponding binary labels, i.e. $y_i \in \{0, 1\}$ for $\forall i = 1, ..., n$. The logistic function is defined as $\sigma(z) = \frac{1}{1+e^{-z}}$. The parameters associated with the LR model are $w_0$ and $\vec{w} = (w_1, ..., w_d)$. Let ($\vec{x}$, $y$) be a test sample, then we have the following probability model for logistic regression:
 
 \begin{align*}
     p = P(y=1 | \vec{x}; w_0, \vec{w}) &= \sigma(w_0 + \sum\limits_{j=1}^d w_jx_j) = \frac{1}{1 + e^{-(w_0 + \vec{w}^\top\vec{x})}}\\
@@ -116,7 +116,7 @@ Given the training set, we learn the LR parameters using MLE (Maximum Likelyhood
   LJCL = ln\prod\limits_{i=1}^nP(y_i | \vec{x_i}; \vec{w}) = \sum\limits_{i=1}^nlnP(y_i | \vec{x_i}; \vec{w})
 \end{equation}
 
-For each parameter $w_j$, we set the partial derivative of LJCL with respect to $w_j$ to 0:
+For each parameter $w_j$, the partial derivative of LJCL with respect to $w_j$ is:
 
 \begin{equation}
 \begin{split}
@@ -126,15 +126,32 @@ For each parameter $w_j$, we set the partial derivative of LJCL with respect to 
   &= \sum\limits_{i:y_i=1}(1+e^{-\vec{w}^\top\vec{x_i}})\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}} + \sum\limits_{i:y_i=0}\frac{(1+e^{-\vec{w}^\top\vec{x_i}})}{e^{-\vec{w}^\top\vec{x_i}}}\frac{1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}}\\
   &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij}\\
   &= \sum\limits_{i:y_i=1}(1-p_i)x_{ij} + \sum\limits_{i:y_i=0}(-p_i)x_{ij}\\
-  &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij} = 0
+  &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij}
 \end{split}
 \end{equation}
 
-\subsubsection{L2 Regularization}
+Instead of evaluating $\sum\limits_{i=1}^n(y_i-p_i)x_{ij}$ for all $j$, which has a complexity of
+$O(nd)$, we compute a random approximation of the partial derivatives (gradient):
+\begin{equation}
+  \frac{\partial}{\partial w_j} LJCL = \sum\limits_{i=1}^n(y_i-p_i)x_{ij} \approx n(y_i-p_i)x_{ij}
+\end{equation}
+where $i$ is selected randomly from the training set. Therefore, the update rule for parameter $w_j$ using stochasitc gradient ascent is:
+\begin{equation}
+  w_j = w_j + \lambda (y_i-p_i)x_{ij}
+\end{equation}
+where $n$ is embedded in $\lambda$ since it is a constant.
+
+Stochastic gradient ascent (descent) is particularly useful for sparse data (where most of the $x_j$'s are 0) because only a few parameters need to be updated for each iteration [6]. One practical issue to be noticed is that since the learning rate $\lambda$ is kept constant for every parameter, it is necessary to normalize the magnitude of every feature beforehand [6].
+
+\subsubsection{L2-Regularization}
+
+As mentioned in section 1, we apply regularization to prevent overfitting, i.e. we penalize on the magnitude of the parameters. For L2-regularization, instead of maximizing $LJCL$, we now maximize $LJCL - \mu ||\vec{w}||_2^2$ to obtain MLE, where $\mu$ quantifies the penalty scale. Accordingly, the update rule for parameter $w_j$ becomes:
+\begin{equation}
+  w_j = w_j + \lambda [(y_i-p_i)x_{ij} - 2\mu w_j]
+\end{equation}
 
 
-
-\subsubsection{L1 Regularization}
+\subsubsection{L1-Regularization}
 
 \subsection{Petuum?}
 
@@ -147,23 +164,30 @@ For each parameter $w_j$, we set the partial derivative of LJCL with respect to 
 \subsubsection*{References}
 
 \small{
-[1] Alexander, J.A. \& Mozer, M.C. (1995) Template-based algorithms
-for connectionist rule extraction. In G. Tesauro, D. S. Touretzky
-and T.K. Leen (eds.), {\it Advances in Neural Information Processing
-Systems 7}, pp. 609-616. Cambridge, MA: MIT Press.
+[1] Ho, Q., Cipar, J., Cui, H., Kim, J. K., Lee, S., Gibbons, P. B., Gibson, G. A., Ganger, G. R., \& Xing, E. P. (2013). More Effective Distributed ML via a Stale Synchronous Parallel Parameter Server. In {\it Advances in Neural Information Processing Systems} (pp. 1223-1231).
 
-[2] Bower, J.M. \& Beeman, D. (1995) {\it The Book of GENESIS: Exploring
-Realistic Neural Models with the GEneral NEural SImulation System.}
-New York: TELOS/Springer-Verlag.
+[2] Dai, W. et al. (2013). Petuum: A Framework for Iterative-Convergent Distributed ML. {\it arXiv preprint arXiv:1312}.7651.
 
-[3] Hasselmo, M.E., Schnell, E. \& Barkai, E. (1995) Dynamics of learning
-and recall at excitatory recurrent synapses and cholinergic modulation
-in rat hippocampal region CA3. {\it Journal of Neuroscience}
-{\bf 15}(7):5249-5262.
+[3] Liu, J., Chen, J., \& Ye, J. (2009). Large-scale sparse logistic regression. In {\it Proceedings of the 15th ACM SIGKDD international conference on Knowledge discovery and data mining} (pp. 547-556). ACM.
 
-[10] http://www.emarketer.com/Article/Digital-Account-One-Five-Ad-Dollars/1009592
+[4] McMahan, H. B. et al. (2013). Ad click prediction: a view from the trenches. In {\it Proceedings of the 19th ACM SIGKDD international conference on Knowledge discovery and data mining} (pp. 1222-1230). ACM.
 
-[11] http://searchenginewatch.com/article/2140712/How-Google-Made-37.9-Billion-in-2011
+[5] Dean, J. et al. (2012). Large Scale Distributed Deep Networks. In {\it NIPS} (pp. 1232-1240).
+
+[6]
+
+[7] Richardson, M., Dominowska, E., \& Ragno, R. (2007). Predicting clicks: estimating the click-through rate for new ads. In {\it Proceedings of the 16th international conference on World Wide Web} (pp. 521-530). ACM.
+
+[8] Low, Y., Bickson, D., Gonzalez, J., Guestrin, C,. Kyrola, A., \& Hellerstein, J. M. (2012). Distributed GraphLab: a framework for machine learning and data mining in the cloud. {\it Proceedings of the VLDB Endowment}, 5(8), 716-727.
+
+[9] Wei, J., Dai, W., Kumar, A., Zheng, X., Ho, Q., \& Xing, E. P. (2013). Consistency Models for Distributed ML with Theoretical Guarantees. {\it arXiv preprint arXiv:1312}.7869.
+
+[10] Growth in digital to remain in double digits through 2015. http://www.emarketer.com/Article/Digital-Account-One-Five-Ad-Dollars/1009592
+
+[11] Miranda M. How Google Made \$37.9 Billion in 2011 http://searchenginewatch.com/article/2140712/How-Google-Made-37.9-Billion-in-2011
+
+[12] Niu, F., Recht, B., Ré, C., \& Wright, S. J. (2011). Hogwild!: A lock-free approach to parallelizing stochastic gradient descent. {\it Advances in Neural Information Processing Systems, 24}, 693-701.
+
 }
 
 \end{document}
