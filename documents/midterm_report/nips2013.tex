@@ -79,7 +79,7 @@ Despite that large-scale regularized logistic regression is widely adopted in pr
 \section{Related Work}
 \label{gen_inst}
 
-
+L1-regularized logistic regression is more difficult than L2-regularized logistic regression, because the regularization is no longer differentiable. But researchers have developed several efficient methods to solve this problem. Although gradient does not exist with $l1$ regularization, subgradient exists and can be used instead of gradient in the gradient decent algorithm[Fast]. Shalev-Shwartz and Tewari[A Stocha] transformed the indifferentiable objective function into an equivalent problem with a twice-differentiable regularizer. Then a greate number of methods, such as gradient descent, coordinate descent and second-order methods, can be applied to solve this new problem. According to Schmidt etc.[Fast], such approach could be regarded as unconstrained approximations. Schmidt etc.[Fast] also mentioned another approach to cast the problem as a constrained optimization problem and sovle the new problem.
 
 \section{Methods}
 \label{headings}
@@ -135,9 +135,35 @@ For each parameter $w_j$, we set the partial derivative of LJCL with respect to 
 
 
 \subsubsection{L1 Regularization}
+We decided to use the subgradient decent method to solve the L1-regularized logistic regression. The reason for choosing this method is its simplicity and efficency.
 
-\subsection{Petuum?}
+A vector $\textup{g} \in \textbf{R}^n$ is a subgradient of $\textup{f}:\textbf{R}^n \rightarrow \textbf{R}$ at $x_0 \in \textbf{R}^n$ if for all $z \in \textbf{R}^n$,
 
+\begin{equation}
+f(z) \ge f(x) + g^T(z-x)
+\end{equation}
+
+And this paper[Fast] has given the calcuation of subgradient for $l1$-regularized logistic regression.
+\begin{equation}
+\bigtriangledown_if(x) = \left\{\begin{matrix}
+\bigtriangledown_iLJCL(x) + \lambda sign(x_i) & |x_i| > 0\\ 
+\bigtriangledown_iLJCL(x) + \lambda & x_i=0,\bigtriangledown_iLJCL(x)<-\lambda\\ 
+\bigtriangledown_iLJCL(x) - \lambda & x_i=0,\bigtriangledown_iLJCL(x)>\lambda\\ 
+0 & x_i=0, -\lambda \le \bigtriangledown_iLJCL(x) \le \lambda
+\end{matrix}\right.
+\end{equation}
+
+We can replace the gradient in the previous section with this subgradient, and get the new updating rule.
+
+\subsection{Parallelization on Petuum}
+Although stochastic gradient descent is efficient, the methods discussed above are sequential, so that it is impractical to apply these methods on very large data sets in a distributed environment. In order to extend stochastic gradient descent to large data sets, we propal our parallelization design based on Petuum framework. We will implement our system in a similar way of Jeffrey Dean[Large Scale], which implemented stochastic gradient descent on google's DistBelief framework. In our design, the only difference between $l1$-regularization and $l2$-regularization is the updating rule. So the description below fits for the two problems. 
+
+The key idea is to parallelize according to both weights and data at the same time. The Petuum-PS contains the global weight table, which can be accessed by workers in an asynchronized way. Our goal is to update weights in the weight table until they are converged. First, we divide the training data into a number of subsets and assign one subset to one worker. Normally, a worker will ask the parameter server the current weights, and then process on its own subset using mini-batch stochastic gradient descent with appropriate rules. Workers will try to update the global weight table after one round of iteration. Unlike the usual case, each worker is only responsible for updating a disjoint subset of weights. The training process will terminate when the weights converge.
+
+In fact, the Petuum-PS might reply outdated weights instead of the real current weights in most cases. In another words, the updated weights of one worker might not be seen by other workers immediately. However, the correctness of machine learning algorithoms on Petuum framework was offered by CMU researchers[]. The relaxation of consistency speeds up the training process and is more friendly to super large dataset.
+
+Our method can be regarded as a variant of Shotgun[Parallel Co], a parallelized method of Shooting[Penalized regr] algorithom. The main difference is 1) we update weights in an asychronized way, 2) each processing thread updates weights using a subset of data and 3) each thread is responsible for multiple weights. The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one. 
+ 
 \section{Experiments}
 \label{others}
 
@@ -164,6 +190,11 @@ in rat hippocampal region CA3. {\it Journal of Neuroscience}
 [10] http://www.emarketer.com/Article/Digital-Account-One-Five-Ad-Dollars/1009592
 
 [11] http://searchenginewatch.com/article/2140712/How-Google-Made-37.9-Billion-in-2011
+
+[] Fast Optimization Methods for L1 Regularization: A Comparative Study and Two New Approaches
+[] A Stochastic methods for l1 regularized loss minimization
+[] Parallel Coordinate Descent for L1-Regularized Loss Minimization
+[] Penalized regressions: The bridge versus the lasso
 }
 
 \end{document}
