@@ -70,7 +70,7 @@ The most common financial model, adopted by Google, Yahoo, and Microsoft [7], fo
 
 Three practical issues need to be resolved for ad click prediction systems to achieve good performance: sparsity, scalability and adptiveness. First, in such applications, the number of features is usually very large, resulting in high-dimensional data (examples). However, since the number of training examples is limited, logistic regression tends to overfit. A common way to reduce overfitting is through regularization, namely L1-norm and L2-norm regularization. The L2-norm regularization has the advantage of being able to reduce to a convex optimization problem that is always differentiable, while the L1-norm regularization is more attractive for dealing with high-dimensional data because it implicitly embeds feature selection in the classification process [3].
 
-The second practical issue is scalability. Scalability is important to industrial applications because of both massive data volume and massive model size [1]. A typical industrial application nowadays is required to learn and predict billions of instances with high-dimensional feature space per day [4]. Meanwhile, observations show that increasing the scale of machine learning models can significantly improve classification accuracy [5]. The most natural way to address scalability is through parallelism. A number of distributed systems specifically optimized for machine learning have emerged recently [1] [2] [5], along with some theoretical work on consistency models for distributed ML [1] [9]. We will discuss some of these systems in sections 2. For this project, we use Petuum [2], an open source large-scale ML framework currently being developed at CMU, as the centralized shared parameter server to apply iterative-convergent methods to realize regularized LR models in large scale.
+The second practical issue is scalability. Scalability is important to industrial applications because of both massive data volume and massive model size [1]. A typical industrial application nowadays is required to learn and predict billions of instances with high-dimensional feature space per day [4]. Meanwhile, observations show that increasing the scale of machine learning models can significantly improve classification accuracy [5]. The most natural way to address scalability is through parallelism. A number of distributed systems specifically optimized for machine learning have emerged recently [1] [2] [5], along with some theoretical work on consistency models for distributed ML [1] [9]. We will discuss some of these systems in sections 2. For this project, we use Petuum [2], an open source large-scale ML framework currently being developed at CMU, as the centralized shared parameter server to apply iterative-convergent methods (specifically, distributed gradient computation) to realize regularized LR models in large scale.
 
 The final practical issue to be considered is adaptiveness, which means that the existing model is periodically refined through learning of the data obtained from the recent prediction results. Adaptiveness typically requires online algorithms where data is provided by a streaming service. In other words, each training example only needs to be considered once.
 
@@ -88,7 +88,7 @@ In this section, we first present a derivation of the algorithms chosen to imple
 
 \subsection{Stochastic Gradient Ascent (Descent) for Logistic Regression}
 
-Suppose that the training set has n examples $\vec{x_1}$ to $\vec{x_n}$, each having a dimension of d. Let $y_1$ to $y_n$ denote the corresponding binary labels, i.e. $y_i \in \{0, 1\}$ for $\forall i = 1, ..., n$. The logistic function is defined as $\sigma(z) = \frac{1}{1+e^{-z}}$. The parameters associated with the LR model are $w_0$ and $\vec{w} = (w_1, ..., w_d)$. Let ($\vec{x}$, $y$) be a test sample, then we have the following probability model for logistic regression:
+The following derivation refers to [6]. Suppose that the training set has n examples $\vec{x_1}$ to $\vec{x_n}$, each having a dimension of d. Let $y_1$ to $y_n$ denote the corresponding binary labels, i.e. $y_i \in \{0, 1\}$ for $\forall i = 1, ..., n$. The logistic function is defined as $\sigma(z) = \frac{1}{1+e^{-z}}$. The parameters associated with the LR model are $w_0$ and $\vec{w} = (w_1, ..., w_d)$. Let ($\vec{x}$, $y$) be a test sample, then we have the following probability model for logistic regression:
 
 \begin{align*}
     p = P(y=1 | \vec{x}; w_0, \vec{w}) &= \sigma(w_0 + \sum\limits_{j=1}^d w_jx_j) = \frac{1}{1 + e^{-(w_0 + \vec{w}^\top\vec{x})}}\\
@@ -116,7 +116,7 @@ Given the training set, we learn the LR parameters using MLE (Maximum Likelyhood
   LJCL = ln\prod\limits_{i=1}^nP(y_i | \vec{x_i}; \vec{w}) = \sum\limits_{i=1}^nlnP(y_i | \vec{x_i}; \vec{w})
 \end{equation}
 
-For each parameter $w_j$, we set the partial derivative of LJCL with respect to $w_j$ to 0:
+For each parameter $w_j$, the partial derivative of LJCL with respect to $w_j$ is:
 
 \begin{equation}
 \begin{split}
@@ -126,46 +126,73 @@ For each parameter $w_j$, we set the partial derivative of LJCL with respect to 
   &= \sum\limits_{i:y_i=1}(1+e^{-\vec{w}^\top\vec{x_i}})\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}} + \sum\limits_{i:y_i=0}\frac{(1+e^{-\vec{w}^\top\vec{x_i}})}{e^{-\vec{w}^\top\vec{x_i}}}\frac{1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}}\\
   &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij}\\
   &= \sum\limits_{i:y_i=1}(1-p_i)x_{ij} + \sum\limits_{i:y_i=0}(-p_i)x_{ij}\\
-  &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij} = 0
+  &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij}
 \end{split}
 \end{equation}
 
-\subsubsection{L2 Regularization}
+Instead of evaluating $\sum\limits_{i=1}^n(y_i-p_i)x_{ij}$ for all $j$, which has a complexity of
+$O(nd)$, we compute a random approximation of the partial derivatives (gradient):
+\begin{equation}
+  \frac{\partial}{\partial w_j} LJCL = \sum\limits_{i=1}^n(y_i-p_i)x_{ij} \approx n(y_i-p_i)x_{ij}
+\end{equation}
+where $i$ is selected randomly from the training set. Therefore, the update rule for parameter $w_j$ using stochasitc gradient ascent is:
+\begin{equation}
+  w_j = w_j + \lambda (y_i-p_i)x_{ij}
+\end{equation}
+where $n$ is embedded in $\lambda$ since it is a constant.
+
+Stochastic gradient ascent (descent) is particularly useful for sparse data (where most of the $x_j$'s are 0) because only a few parameters need to be updated for each iteration [6]. One practical issue to be noticed is that since the learning rate $\lambda$ is kept constant for every parameter, it is necessary to normalize the magnitude of every feature beforehand [6].
+
+\subsubsection{L2-Regularization}
+
+As mentioned in section 1, we apply regularization to prevent overfitting, i.e. we penalize on the magnitude of the parameters. For L2-regularization, instead of maximizing $LJCL$, we now maximize $LJCL - \mu ||\vec{w}||_2^2$ to obtain MLE, where $\mu$ quantifies the penalty scale. Accordingly, the update rule for parameter $w_j$ becomes:
+\begin{equation}
+  w_j = w_j + \lambda [(y_i-p_i)x_{ij} - 2\mu w_j]
+\end{equation}
 
 
-
-\subsubsection{L1 Regularization}
+\subsubsection{L1-Regularization}
 We decided to use the subgradient decent method to solve the L1-regularized logistic regression. The reason for choosing this method is its simplicity and efficency.
 
 A vector $\textup{g} \in \textbf{R}^n$ is a subgradient of $\textup{f}:\textbf{R}^n \rightarrow \textbf{R}$ at $x_0 \in \textbf{R}^n$ if for all $z \in \textbf{R}^n$,
 
 \begin{equation}
-f(z) \ge f(x) + g^T(z-x)
+f(z) \ge f(x_0) + g^T(z-x_0)
 \end{equation}
 
 And this paper[Fast] has given the calcuation of subgradient for $l1$-regularized logistic regression.
 \begin{equation}
-\bigtriangledown_if(x) = \left\{\begin{matrix}
-\bigtriangledown_iLJCL(x) + \lambda sign(x_i) & |x_i| > 0\\ 
-\bigtriangledown_iLJCL(x) + \lambda & x_i=0,\bigtriangledown_iLJCL(x)<-\lambda\\ 
-\bigtriangledown_iLJCL(x) - \lambda & x_i=0,\bigtriangledown_iLJCL(x)>\lambda\\ 
-0 & x_i=0, -\lambda \le \bigtriangledown_iLJCL(x) \le \lambda
+\bigtriangledown f(\omega_i) = \left\{\begin{matrix}
+\bigtriangledown LJCL(\omega_i) + \lambda sign(\omega_i) & |\omega_i| > 0\\ 
+\bigtriangledown LJCL(\omega_i) + \lambda & \omega_i=0,\bigtriangledown LJCL(\omega_i)<-\lambda\\ 
+\bigtriangledown LJCL(\omega_i) - \lambda & \omega_i=0,\bigtriangledown LJCL(\omega_i)>\lambda\\ 
+0 & \omega_i=0, -\lambda \le \bigtriangledown LJCL(\omega_i) \le \lambda
 \end{matrix}\right.
 \end{equation}
 
 We can replace the gradient in the previous section with this subgradient, and get the new updating rule.
 
 \subsection{Parallelization on Petuum}
-Although stochastic gradient descent is efficient, the methods discussed above are sequential, so that it is impractical to apply these methods on very large data sets in a distributed environment. In order to extend stochastic gradient descent to large data sets, we propal our parallelization design based on Petuum framework. We will implement our system in a similar way of Jeffrey Dean[Large Scale], which implemented stochastic gradient descent on google's DistBelief framework. In our design, the only difference between $l1$-regularization and $l2$-regularization is the updating rule. So the description below fits for the two problems. 
+Although stochastic gradient descent is efficient, the methods discussed above are sequential, so that it is impractical to apply these methods on very large data sets in a distributed environment. In order to extend stochastic gradient descent to large data sets, we propose our parallelization design based on Petuum framework. We will implement our system in a similar way of Jeffrey Dean[Large Scale], which implemented stochastic gradient descent on google's DistBelief framework.
 
-The key idea is to parallelize according to both weights and data at the same time. The Petuum-PS contains the global weight table, which can be accessed by workers in an asynchronized way. Our goal is to update weights in the weight table until they are converged. First, we divide the training data into a number of subsets and assign one subset to one worker. Normally, a worker will ask the parameter server the current weights, and then process on its own subset using mini-batch stochastic gradient descent with appropriate rules. Workers will try to update the global weight table after one round of iteration. Unlike the usual case, each worker is only responsible for updating a disjoint subset of weights. The training process will terminate when the weights converge.
+The first thing to do is to configure the Petuum system. The Petuum-PS has already offer a centralized parameter server, and it also supports several consistency models. We need to configure the parameter table and make sure the server run in the SSP consistensy model.
 
-In fact, the Petuum-PS might reply outdated weights instead of the real current weights in most cases. In another words, the updated weights of one worker might not be seen by other workers immediately. However, the correctness of machine learning algorithoms on Petuum framework was offered by CMU researchers[]. The relaxation of consistency speeds up the training process and is more friendly to super large dataset.
+Under SSP consistensy model, the key idea of our method is to parallelize according to both parameters and data at the same time. The Petuum-PS maintains the global paramter table, which can be accessed and shared by workers in an asynchronized way. Our goal is to update parameters in the parameter table until they are converged. We divide the training data into a number of subsets and assign one subset to one worker. Workers will communicate with each other through the parameter server, and each worker will only update a disjoint set of parameters.
 
-Our method can be regarded as a variant of Shotgun[Parallel Co], a parallelized method of Shooting[Penalized regr] algorithom. The main difference is 1) we update weights in an asychronized way, 2) each processing thread updates weights using a subset of data and 3) each thread is responsible for multiple weights. The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one. 
+For example, we want to train a model with 400 parameters on 320 instances, and have one parameter server and four worker machines. There are 4 worker threads. Each thread will be assigned to 80 instances, and only responsible for 100 parameters' updating. In a typical round, the worker will ask the parameter server for all current weights, and the parameter server might reply outdated weights. After receiving weights, the worker will apply the algorithom on its own 80 training instances, and try to update 100 parameters in the global weight table after one round of iteration. Workers will repeate such process until the weights converge.
+
+In fact, the Petuum-PS might reply outdated parameters instead of the real current weights in most cases. In another words, the updated weights of one worker might not be seen by other workers immediately. However, the correctness of machine learning algorithoms on Petuum framework was offered by CMU researchers[]. The relaxation of consistency speeds up the training process and is more friendly to super large dataset.
+
+Our method can be regarded as a variant of Shotgun[Parallel Co], a parallelized method of Shooting[Penalized regr] algorithom. The main difference is 1) we update parameters in an asychronized way, 2) each processing thread updates weights using a subset of data and 3) each thread is responsible for multiple weights. The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one. 
+
  
 \section{Experiments}
 \label{others}
+We would like to use a Wikipedia dataset that has 3 million instances as our dataset. But first we will generate a small dataset, whose size is 10,000, by sampling the raw dataset, in order to debug and test on a single machine.
+
+First, we will run our program on the small dataset using one thread on one single machine. Such single-thread implement has no consistency issue and thus is the same as the traditional non-parallelized method. It will give us the baseline of evaluation, including converge time and classification correctness rate. Second, we will apply our program on the samll dataset using mutil-threads on one single machine. We will increase the number of threads until it reaches the same number of cores in the computer, and evalute the converge rate and correctness rate with different number of threads. Our expectation is that it will give us a close-to-linear training speed up without a big decrease of correctness.
+
+If time and resource permit, we might set up the Petuum system on a cluster, such as Amazon EC2, and run our program on the big raw dataset as an option. Such experiment will give us the real performance on the real world big data.
 
 \section{Conclusion}
 
@@ -173,23 +200,30 @@ Our method can be regarded as a variant of Shotgun[Parallel Co], a parallelized 
 \subsubsection*{References}
 
 \small{
-[1] Alexander, J.A. \& Mozer, M.C. (1995) Template-based algorithms
-for connectionist rule extraction. In G. Tesauro, D. S. Touretzky
-and T.K. Leen (eds.), {\it Advances in Neural Information Processing
-Systems 7}, pp. 609-616. Cambridge, MA: MIT Press.
+[1] Ho, Q., Cipar, J., Cui, H., Kim, J. K., Lee, S., Gibbons, P. B., Gibson, G. A., Ganger, G. R., \& Xing, E. P. (2013). More Effective Distributed ML via a Stale Synchronous Parallel Parameter Server. In {\it Advances in Neural Information Processing Systems} (pp. 1223-1231).
 
-[2] Bower, J.M. \& Beeman, D. (1995) {\it The Book of GENESIS: Exploring
-Realistic Neural Models with the GEneral NEural SImulation System.}
-New York: TELOS/Springer-Verlag.
+[2] Dai, W. et al. (2013). Petuum: A Framework for Iterative-Convergent Distributed ML. {\it arXiv preprint arXiv:1312}.7651.
 
-[3] Hasselmo, M.E., Schnell, E. \& Barkai, E. (1995) Dynamics of learning
-and recall at excitatory recurrent synapses and cholinergic modulation
-in rat hippocampal region CA3. {\it Journal of Neuroscience}
-{\bf 15}(7):5249-5262.
+[3] Liu, J., Chen, J., \& Ye, J. (2009). Large-scale sparse logistic regression. In {\it Proceedings of the 15th ACM SIGKDD international conference on Knowledge discovery and data mining} (pp. 547-556). ACM.
 
-[10] http://www.emarketer.com/Article/Digital-Account-One-Five-Ad-Dollars/1009592
+[4] McMahan, H. B. et al. (2013). Ad click prediction: a view from the trenches. In {\it Proceedings of the 19th ACM SIGKDD international conference on Knowledge discovery and data mining} (pp. 1222-1230). ACM.
 
-[11] http://searchenginewatch.com/article/2140712/How-Google-Made-37.9-Billion-in-2011
+[5] Dean, J. et al. (2012). Large Scale Distributed Deep Networks. In {\it NIPS} (pp. 1232-1240).
+
+[6]
+
+[7] Richardson, M., Dominowska, E., \& Ragno, R. (2007). Predicting clicks: estimating the click-through rate for new ads. In {\it Proceedings of the 16th international conference on World Wide Web} (pp. 521-530). ACM.
+
+[8] Low, Y., Bickson, D., Gonzalez, J., Guestrin, C,. Kyrola, A., \& Hellerstein, J. M. (2012). Distributed GraphLab: a framework for machine learning and data mining in the cloud. {\it Proceedings of the VLDB Endowment}, 5(8), 716-727.
+
+[9] Wei, J., Dai, W., Kumar, A., Zheng, X., Ho, Q., \& Xing, E. P. (2013). Consistency Models for Distributed ML with Theoretical Guarantees. {\it arXiv preprint arXiv:1312}.7869.
+
+[10] Growth in digital to remain in double digits through 2015. http://www.emarketer.com/Article/Digital-Account-One-Five-Ad-Dollars/1009592
+
+[11] Miranda M. How Google Made \$37.9 Billion in 2011 http://searchenginewatch.com/article/2140712/How-Google-Made-37.9-Billion-in-2011
+
+[12] Niu, F., Recht, B., Ré, C., \& Wright, S. J. (2011). Hogwild!: A lock-free approach to parallelizing stochastic gradient descent. {\it Advances in Neural Information Processing Systems, 24}, 693-701.
+
 
 [] Fast Optimization Methods for L1 Regularization: A Comparative Study and Two New Approaches
 [] A Stochastic methods for l1 regularized loss minimization
