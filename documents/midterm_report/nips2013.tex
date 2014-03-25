@@ -79,7 +79,11 @@ Despite that large-scale regularized logistic regression is widely adopted in pr
 \section{Related Work}
 \label{gen_inst}
 
+In response to the unprecedented scalability challenges, various distributed ML frameworks, such as Google Brain [5], GraphLab [8], and SSPtable [1], have emerged recently. One popular idea is to relax synchronization requirements to overcome the inherent sequential nature of some ML models (e.g. stochastic gradient descent) to increase throughput. For example, Google implemented the "downpour SGD" algorithm on their distributed ML framework "Google Brain", which not only parallelizes computation across multiple model instances, but also within each one [5]. Specifically, training data is divided into a number of partitions and each partition only feeds to a single model instance. Meanwhile, all the model replicas share a centralized parameter sever that is also sharded. In other words, a single machine (or thread) within a particular model instance is only responsible for updating one shard of the parameter server using a single partition of training data [5]. In our project, we leverage such design for parallelization. In addition, we also include proper consistency guarantees, namely bounded staleness, to further gain throughput improvements.
 
+Of the all the consistency models, ranging from no consistency to sequential consistency, bounded staleness consistency model, a variant of eventual consistency, has recently proved to work the best for iterative-convergent algorithms (e.g. SGD) especially with sparse data [1] [2] [9] [12]. A notable example is the Stale Synchronous Parallel (SSP) model presented by [1], as opposed to the traditional Bulk Synchronous Parallel (BSP) model. In SSP, a model replica is allowed to lead or lag other replicas by at most s iterations, where s is a preconfigured number, while the convergence of the algorithm is still guaranteed [1]. In this way, communication between a local replica and the parameter server is only required when the staleness of the local replica is more than s iterations [9]. Therefore, the network communication cost is significantly reduced, resulting in higher throughput [5].
+
+Petuum [5], the distributed ML framework used in this project, is a general-purpose platform designed for big learning. In particular, it is optimized to solve loss function minimization problems that have an embedded iterative-convergent nature [5]. Similar to its precedence, Petuum provides a distributed key-value store as the shared parameter server among threads. In addition, Petuum also introduces a variable scheduler to dynamically maintain load balancing among worker machines. Moreover, Petuum offers a number of bounded-staleness consistency models, including SSP and value-bounded consistency, to reduce network cost while remaining error-resistant. Other system-level optimizations associated with Petuum include process-level and thread-level caching and out-of-core storage support [5].
 
 \section{Methods}
 \label{headings}
@@ -104,11 +108,11 @@ Using the above probablity model, we can compute the log odds as the following:
 
 and thus we have the classification rule for LR:
 \begin{align*}
-  y &= 1, \ \ \ \ \ if \ w_0 + \vec{w}^\top\vec{x} \geq 1\\
+  y &= 1, \ \ \ \ \ if \ w_0 + \vec{w}^\top\vec{x} \geq 0\\
   y &= 0, \ \ \ \ \ otherwise.
 \end{align*}
 
-Let $\vec{w^*} = (w_0, \vec{w})$ and $\vec{x^*} = (1, \vec{x})$. Now the classification criteria becomes whether $\vec{w^*}^\top\vec{x^*} \geq 1$ or not. For notation simplicity, we denete $\vec{w^*}$ and $\vec{x^*}$ by $\vec{w}$ and $\vec{x}$ respectively from now on.
+Let $\vec{w^*} = (w_0, \vec{w})$ and $\vec{x^*} = (1, \vec{x})$. Now the classification criteria becomes whether $\vec{w^*}^\top\vec{x^*} \geq 0$ or not. For notation simplicity, we denete $\vec{w^*}$ and $\vec{x^*}$ by $\vec{w}$ and $\vec{x}$ respectively from now on.
 
 Given the training set, we learn the LR parameters using MLE (Maximum Likelyhood Estimator) method. Specifically, we want to maximize the following log joint conditional likelihood:
 
@@ -124,7 +128,7 @@ For each parameter $w_j$, the partial derivative of LJCL with respect to $w_j$ i
   &= \sum\limits_{i:y_i=1}\frac{\partial}{\partial w_j}lnp_i + \sum\limits_{i:y_i=0}\frac{\partial}{\partial w_j}ln(1-p_i)\\
   &= \sum\limits_{i:y_i=1}\frac{1}{p_i}\frac{\partial}{\partial w_j}p_i + \sum\limits_{i:y_i=0}\frac{1}{1-p_i}(-\frac{\partial}{\partial w_j}(1-p_i))\\
   &= \sum\limits_{i:y_i=1}(1+e^{-\vec{w}^\top\vec{x_i}})\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}} + \sum\limits_{i:y_i=0}\frac{(1+e^{-\vec{w}^\top\vec{x_i}})}{e^{-\vec{w}^\top\vec{x_i}}}\frac{1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}}\\
-  &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij}\\
+  &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{1+e^{-\vec{w}^\top\vec{x_i}}}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{1+e^{-\vec{w}^\top\vec{x_i}}}x_{ij}\\
   &= \sum\limits_{i:y_i=1}(1-p_i)x_{ij} + \sum\limits_{i:y_i=0}(-p_i)x_{ij}\\
   &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij}
 \end{split}
@@ -174,7 +178,7 @@ As mentioned in section 1, we apply regularization to prevent overfitting, i.e. 
 
 [5] Dean, J. et al. (2012). Large Scale Distributed Deep Networks. In {\it NIPS} (pp. 1232-1240).
 
-[6]
+[6] Elkan, C. Maxinum Likelihood, Logistic Regression, and Stochastic Gradient Training. http://cseweb.ucsd.edu/~elkan/250B/logreg.pdf
 
 [7] Richardson, M., Dominowska, E., \& Ragno, R. (2007). Predicting clicks: estimating the click-through rate for new ads. In {\it Proceedings of the 16th international conference on World Wide Web} (pp. 521-530). ACM.
 
