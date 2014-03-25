@@ -3,6 +3,7 @@
 \usepackage{hyperref}
 \usepackage{url}
 \usepackage{amsmath}
+\usepackage{graphicx}
 %\documentstyle[nips13submit_09,times,art10]{article} % For LaTeX 2.09
 
 
@@ -79,7 +80,13 @@ Despite that large-scale regularized logistic regression is widely adopted in pr
 \section{Related Work}
 \label{gen_inst}
 
-L1-regularized logistic regression is more difficult than L2-regularized logistic regression, because the regularization is no longer differentiable. But researchers have developed several efficient methods to solve this problem. Although gradient does not exist with $l1$ regularization, subgradient exists and can be used instead of gradient in the gradient decent algorithm[Fast]. Shalev-Shwartz and Tewari[A Stocha] transformed the indifferentiable objective function into an equivalent problem with a twice-differentiable regularizer. Then a greate number of methods, such as gradient descent, coordinate descent and second-order methods, can be applied to solve this new problem. According to Schmidt etc.[Fast], such approach could be regarded as unconstrained approximations. Schmidt etc.[Fast] also mentioned another approach to cast the problem as a constrained optimization problem and sovle the new problem.
+L1-regularized logistic regression is more difficult than L2-regularized logistic regression, because the regularization is no longer differentiable. But researchers have developed several efficient methods to solve this problem. Although gradient does not exist with $l1$ regularization, subgradient exists and can be used instead of gradient in the gradient decent algorithm [15]. Shalev-Shwartz and Tewari [16] transformed the indifferentiable objective function into an equivalent problem with a twice-differentiable regularizer. Then a greate number of methods, such as gradient descent, coordinate descent and second-order methods, can be applied to solve this new problem. According to Schmidt etc.[15], such approach could be regarded as unconstrained approximations. Schmidt etc.[15] also mentioned another approach to cast the problem as a constrained optimization problem and sovle the new problem.
+
+In response to the unprecedented scalability challenges, various distributed ML frameworks, such as Google Brain [5], GraphLab [8], and SSPtable [1], have emerged recently. One popular idea is to relax synchronization requirements to overcome the inherent sequential nature of some ML models (e.g. stochastic gradient descent) to increase throughput. For example, Google implemented the "downpour SGD" algorithm on their distributed ML framework "Google Brain", which not only parallelizes computation across multiple model instances, but also within each one [5]. Specifically, training data is divided into a number of partitions and each partition only feeds to a single model instance. Meanwhile, all the model replicas share a centralized parameter sever that is also sharded. In other words, a single machine (or thread) within a particular model instance is only responsible for updating one shard of the parameter server using a single partition of training data [5]. In our project, we leverage such design for parallelization. In addition, we also include proper consistency guarantees, namely bounded staleness, to further gain throughput improvements.
+
+Of the all the consistency models, ranging from no consistency to sequential consistency, bounded staleness consistency model, a variant of eventual consistency, has recently proved to work the best for iterative-convergent algorithms (e.g. SGD) especially with sparse data [1] [2] [9] [12]. A notable example is the Stale Synchronous Parallel (SSP) model presented by [1], as opposed to the traditional Bulk Synchronous Parallel (BSP) model. In SSP, a model replica is allowed to lead or lag other replicas by at most s iterations, where s is a preconfigured number, while the convergence of the algorithm is still guaranteed [1]. In this way, communication between a local replica and the parameter server is only required when the staleness of the local replica is more than s iterations [9]. Therefore, the network communication cost is significantly reduced, resulting in higher throughput [5].
+
+Petuum [5], the distributed ML framework used in this project, is a general-purpose platform designed for big learning. In particular, it is optimized to solve loss function minimization problems that have an embedded iterative-convergent nature [5]. Similar to its precedence, Petuum provides a distributed key-value store as the shared parameter server among threads. In addition, Petuum also introduces a variable scheduler to dynamically maintain load balancing among worker machines. Moreover, Petuum offers a number of bounded-staleness consistency models, including SSP and value-bounded consistency, to reduce network cost while remaining error-resistant. Other system-level optimizations associated with Petuum include process-level and thread-level caching and out-of-core storage support [5].
 
 \section{Methods}
 \label{headings}
@@ -104,11 +111,11 @@ Using the above probablity model, we can compute the log odds as the following:
 
 and thus we have the classification rule for LR:
 \begin{align*}
-  y &= 1, \ \ \ \ \ if \ w_0 + \vec{w}^\top\vec{x} \geq 1\\
+  y &= 1, \ \ \ \ \ if \ w_0 + \vec{w}^\top\vec{x} \geq 0\\
   y &= 0, \ \ \ \ \ otherwise.
 \end{align*}
 
-Let $\vec{w^*} = (w_0, \vec{w})$ and $\vec{x^*} = (1, \vec{x})$. Now the classification criteria becomes whether $\vec{w^*}^\top\vec{x^*} \geq 1$ or not. For notation simplicity, we denete $\vec{w^*}$ and $\vec{x^*}$ by $\vec{w}$ and $\vec{x}$ respectively from now on.
+Let $\vec{w^*} = (w_0, \vec{w})$ and $\vec{x^*} = (1, \vec{x})$. Now the classification criteria becomes whether $\vec{w^*}^\top\vec{x^*} \geq 0$ or not. For notation simplicity, we denete $\vec{w^*}$ and $\vec{x^*}$ by $\vec{w}$ and $\vec{x}$ respectively from now on.
 
 Given the training set, we learn the LR parameters using MLE (Maximum Likelyhood Estimator) method. Specifically, we want to maximize the following log joint conditional likelihood:
 
@@ -124,7 +131,7 @@ For each parameter $w_j$, the partial derivative of LJCL with respect to $w_j$ i
   &= \sum\limits_{i:y_i=1}\frac{\partial}{\partial w_j}lnp_i + \sum\limits_{i:y_i=0}\frac{\partial}{\partial w_j}ln(1-p_i)\\
   &= \sum\limits_{i:y_i=1}\frac{1}{p_i}\frac{\partial}{\partial w_j}p_i + \sum\limits_{i:y_i=0}\frac{1}{1-p_i}(-\frac{\partial}{\partial w_j}(1-p_i))\\
   &= \sum\limits_{i:y_i=1}(1+e^{-\vec{w}^\top\vec{x_i}})\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}} + \sum\limits_{i:y_i=0}\frac{(1+e^{-\vec{w}^\top\vec{x_i}})}{e^{-\vec{w}^\top\vec{x_i}}}\frac{1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}\frac{\partial}{\partial w_j}e^{-\vec{w}^\top\vec{x_i}}\\
-  &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{(1+e^{-\vec{w}^\top\vec{x_i}})^2}x_{ij}\\
+  &= \sum\limits_{i:y_i=1}\frac{e^{-\vec{w}^\top\vec{x_i}}}{1+e^{-\vec{w}^\top\vec{x_i}}}x_{ij} + \sum\limits_{i:y_i=0}\frac{-1}{1+e^{-\vec{w}^\top\vec{x_i}}}x_{ij}\\
   &= \sum\limits_{i:y_i=1}(1-p_i)x_{ij} + \sum\limits_{i:y_i=0}(-p_i)x_{ij}\\
   &= \sum\limits_{i=1}^n(y_i-p_i)x_{ij}
 \end{split}
@@ -173,17 +180,26 @@ And this paper[Fast] has given the calcuation of subgradient for $l1$-regularize
 We can replace the gradient in the previous section with this subgradient, and get the new updating rule.
 
 \subsection{Parallelization on Petuum}
-Although stochastic gradient descent is efficient, the methods discussed above are sequential, so that it is impractical to apply these methods on very large data sets in a distributed environment. In order to extend stochastic gradient descent to large data sets, we propose our parallelization design based on Petuum framework. We will implement our system in a similar way of Jeffrey Dean[Large Scale], which implemented stochastic gradient descent on google's DistBelief framework.
+Although stochastic gradient descent is efficient, the methods discussed above are sequential, so that it is impractical to apply these methods on very large data sets in a distributed environment. In order to extend stochastic gradient descent to large data sets, we propose our parallelization design based on Petuum framework. We will implement our system in a similar way of Jeffrey Dean[5], which implemented stochastic gradient descent on google's DistBelief framework.
 
 The first thing to do is to configure the Petuum system. The Petuum-PS has already offer a centralized parameter server, and it also supports several consistency models. We need to configure the parameter table and make sure the server run in the SSP consistensy model.
 
 Under SSP consistensy model, the key idea of our method is to parallelize according to both parameters and data at the same time. The Petuum-PS maintains the global paramter table, which can be accessed and shared by workers in an asynchronized way. Our goal is to update parameters in the parameter table until they are converged. We divide the training data into a number of subsets and assign one subset to one worker. Workers will communicate with each other through the parameter server, and each worker will only update a disjoint set of parameters.
 
-For example, we want to train a model with 400 parameters on 320 instances, and have one parameter server and four worker machines. There are 4 worker threads. Each thread will be assigned to 80 instances, and only responsible for 100 parameters' updating. In a typical round, the worker will ask the parameter server for all current weights, and the parameter server might reply outdated weights. After receiving weights, the worker will apply the algorithom on its own 80 training instances, and try to update 100 parameters in the global weight table after one round of iteration. Workers will repeate such process until the weights converge.
+\begin{figure}[h]
+\begin{center}
+%\framebox[4.0in]{$\;$}
+%701.png
+\fbox{\rule[-.5cm]{0cm}{4cm} \includegraphics[width=320px]{701.png} \rule[-.5cm]{4cm}{0cm}}
+\end{center}
+\caption{A normal working example.}
+\label{example}
+\end{figure}
+For example, in Figure \ref{example}, we want to train a model with 400 parameters on 320 instances, and have one parameter server and four worker machines. There are 4 worker threads. Each thread will be assigned to 80 instances, and only responsible for 100 parameters' updating. In a typical round, the worker will ask the parameter server for all current weights, and the parameter server might reply outdated weights. After receiving weights, the worker will apply the algorithom on its own 80 training instances, and try to update 100 parameters in the global weight table after one round of iteration. Workers will repeate such process until the weights converge.
 
-In fact, the Petuum-PS might reply outdated parameters instead of the real current weights in most cases. In another words, the updated weights of one worker might not be seen by other workers immediately. However, the correctness of machine learning algorithoms on Petuum framework was offered by CMU researchers[]. The relaxation of consistency speeds up the training process and is more friendly to super large dataset.
+In fact, the Petuum-PS might reply outdated parameters instead of the real current weights in most cases. In another words, the updated weights of one worker might not be seen by other workers immediately. However, the correctness of machine learning algorithoms on Petuum framework was offered by CMU researchers[1,2,9]. The relaxation of consistency speeds up the training process and is more friendly to super large dataset.
 
-Our method can be regarded as a variant of Shotgun[Parallel Co], a parallelized method of Shooting[Penalized regr] algorithom. The main difference is 1) we update parameters in an asychronized way, 2) each processing thread updates weights using a subset of data and 3) each thread is responsible for multiple weights. The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one. 
+Our method can be regarded as a variant of Shotgun[13], a parallelized method of Shooting[14] algorithom. The main difference is 1) we update parameters in an asychronized way, 2) each processing thread updates weights using a subset of data and 3) each thread is responsible for multiple weights. The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one. 
 
  
 \section{Experiments}
@@ -210,7 +226,7 @@ If time and resource permit, we might set up the Petuum system on a cluster, suc
 
 [5] Dean, J. et al. (2012). Large Scale Distributed Deep Networks. In {\it NIPS} (pp. 1232-1240).
 
-[6]
+[6] Elkan, C. Maxinum Likelihood, Logistic Regression, and Stochastic Gradient Training. http://cseweb.ucsd.edu/~elkan/250B/logreg.pdf
 
 [7] Richardson, M., Dominowska, E., \& Ragno, R. (2007). Predicting clicks: estimating the click-through rate for new ads. In {\it Proceedings of the 16th international conference on World Wide Web} (pp. 521-530). ACM.
 
@@ -224,11 +240,10 @@ If time and resource permit, we might set up the Petuum system on a cluster, suc
 
 [12] Niu, F., Recht, B., Ré, C., \& Wright, S. J. (2011). Hogwild!: A lock-free approach to parallelizing stochastic gradient descent. {\it Advances in Neural Information Processing Systems, 24}, 693-701.
 
-
-[] Fast Optimization Methods for L1 Regularization: A Comparative Study and Two New Approaches
-[] A Stochastic methods for l1 regularized loss minimization
-[] Parallel Coordinate Descent for L1-Regularized Loss Minimization
-[] Penalized regressions: The bridge versus the lasso
+[13] Bradley, J. K., Kyrola, A., Bickson, D., \& Guestrin, C. (2011). Parallel coordinate descent for l1-regularized loss minimization. arXiv preprint arXiv:1105.5379.
+[14] Fu, W. J. (1998). Penalized regressions: the bridge versus the lasso. Journal of computational and graphical statistics, 7(3), 397-416.
+[15] Schmidt, M., Fung, G., \& Rosales, R. (2007). Fast optimization methods for l1 regularization: A comparative study and two new approaches. In Machine Learning: ECML 2007 (pp. 286-297). Springer Berlin Heidelberg.
+[16] Shalev-Shwartz S., Tewari A.. 2011. Stochastic Methods for l1-regularized Loss Minimization. J. Mach. Learn. Res. 12 (July 2011), 1865-1892.
 }
 
 \end{document}
