@@ -86,7 +86,7 @@ Of the all the consistency models, ranging from no consistency to sequential con
 
 Petuum [5], the distributed ML framework used in this project, is a general-purpose platform designed for big learning. In particular, it is optimized to solve loss function minimization problems that have an embedded iterative-convergent nature [5]. Similar to its precedence, Petuum provides a distributed key-value store as the shared parameter server among threads. In addition, Petuum also introduces a variable scheduler to dynamically maintain load balancing among worker machines. Moreover, Petuum offers a number of bounded-staleness consistency models, including SSP and value-bounded consistency, to reduce network cost while remaining error-resistant. Other system-level optimizations associated with Petuum include process-level and thread-level caching and out-of-core storage support [5].
 
-Algorithmwisely, Despite that L1-regularized LR is more difficult than L2-regularized LR because of its indifferentiability, researchers have developed a number of efficient methods to solve the problem. Note that although gradient does not exist with L1-regularization, subgradient exists and can be used instead of gradient in the SGD algorithm [15]. Shalev-Shwartz and Tewari [16] transformed the indifferentiable objective function into an equivalent problem with a twice-differentiable regularizer. Then a great number of methods, such as gradient descent, coordinate descent and second-order methods, can be applied to solve this new optimization problem. According to Schmidt et al.[15], such approach can be considered as unconstrained approximations. Schmidt et al.[15] also mentioned another approach which first reduces the problem to a constrained optimization problem and then sovles it.
+Algorithmwisely, despite that L1-regularized LR is more difficult than L2-regularized LR because of its indifferentiability, researchers have developed a number of efficient methods to solve the problem. Note that although gradient does not exist with L1-regularization, subgradient exists and can be used instead of gradient in the SGD algorithm [15]. Shalev-Shwartz and Tewari [16] transformed the indifferentiable objective function into an equivalent problem with a twice-differentiable regularizer. Then a great number of methods, such as gradient descent, coordinate descent and second-order methods, can be applied to solve this new optimization problem. According to Schmidt et al.[15], such approach can be considered as unconstrained approximations. Schmidt et al.[15] also mentioned another approach which first reduces the problem to a constrained optimization problem and then sovles it.
 
 \section{Methods}
 \label{headings}
@@ -157,46 +157,45 @@ As mentioned in section 1, we apply regularization to prevent overfitting, i.e. 
 
 
 \subsubsection{L1-Regularization}
-We train L1-regularized LR using the subgradient decient method because of its simplicity and efficiency. A vector $\textup{g} \in \textbf{R}^n$ is a subgradient of $\textup{f}:\textbf{R}^n \rightarrow \textbf{R}$ at $x_0 \in \textbf{R}^n$ if for all $z \in \textbf{R}^n$,
-
+For L1-regularization, we now maximize $LJCL - \mu ||\vec{w}||_1$ to obtain MLE.
+We use the subgradient decient method to solve this problem because of its simplicity and efficiency. A vector $\textup{g} \in \textbf{R}^n$ is a subgradient of $\textup{f}:\textbf{R}^n \rightarrow \textbf{R}$ at $x_0 \in \textbf{R}^n$ if for all $z \in \textbf{R}^n$,
 \begin{equation}
 f(z) \ge f(x_0) + g^T(z-x_0)
 \end{equation}
-
 And [15] gives the formula for calculating the subgradient for $l1$-regularized logistic regression.
 \begin{equation}
 \bigtriangledown f(\omega_i) = \left\{\begin{matrix}
-\bigtriangledown LJCL(\omega_i) + \lambda sign(\omega_i) & |\omega_i| > 0\\ 
-\bigtriangledown LJCL(\omega_i) + \lambda & \omega_i=0,\bigtriangledown LJCL(\omega_i)<-\lambda\\ 
-\bigtriangledown LJCL(\omega_i) - \lambda & \omega_i=0,\bigtriangledown LJCL(\omega_i)>\lambda\\ 
-0 & \omega_i=0, -\lambda \le \bigtriangledown LJCL(\omega_i) \le \lambda
+\bigtriangledown LJCL(\omega_i) + \mu sign(\omega_i) & |\omega_i| > 0\\ 
+\bigtriangledown LJCL(\omega_i) + \mu & \omega_i=0,\bigtriangledown LJCL(\omega_i)<-\mu\\ 
+\bigtriangledown LJCL(\omega_i) - \mu & \omega_i=0,\bigtriangledown LJCL(\omega_i)>\mu\\ 
+0 & \omega_i=0, -\mu \le \bigtriangledown LJCL(\omega_i) \le \mu
 \end{matrix}\right.
 \end{equation}
 
-We can replace the gradient in the previous section with the above subgradient to get the update rule for L1-regularized LR.
+We can replace the gradient in the previous section with the above subgradient to get the updating rule for L1-regularized LR.
 
 \subsection{Parallelization on Petuum}
 Although stochastic gradient descent is efficient, the methods are inherently sequential, which makes it impractical to apply on huge amount of data. In order to extend SGD to large data sets, we parallelize the computation using the Petuum framework. We partition both training data and parameters in a similar way Google Brain [5] does to achieve higher throughput and less training time.
 
-First, we need to configure Petuum. Fortunately, Petuum-PS (the latest version) maintains a centralized parameter server, which is shared among workers asynchronously, along with a spectrum of consistency models. We decided to adopt the most recent SSP consistency model for this project. The key idea of the design is to orthogonally parallelize training data and gloabla parameters at the same time. Specifically, we divide the training data into a number of subsets and assign each subset to a bunch of workers, each of which is responsible for updating a disjoint set of parameters.Essentially, workers communicate with each other through the parameter server and will keep updating the parameters until they converge.
+First, we need to configure Petuum. Fortunately, Petuum (the latest version) maintains a centralized parameter server, which is shared among workers asynchronously, along with a spectrum of consistency models. We decided to adopt the most recent SSP consistency model for this project. The key idea of the design is to orthogonally parallelize training data and gloabla parameters at the same time. Specifically, we divide the training data into a number of subsets and assign each subset to a bunch of workers, each of which is responsible for updating a disjoint set of parameters. Essentially, workers communicate with each other through the parameter server and will keep updating the parameters until they converge.
 
 \begin{figure}[h]
 \begin{center}
 %\framebox[4.0in]{$\;$}
 %701.png
-\fbox{\rule[-.5cm]{0cm}{4cm} \includegraphics[width=320px]{701.png} \rule[-.5cm]{4cm}{0cm}}
+\fbox{\rule[-.5cm]{0cm}{4cm} \includegraphics[width=280px]{701.png} \rule[-.5cm]{4cm}{0cm}}
 \end{center}
 \caption{A normal working example.}
 \label{example}
 \end{figure}
 For example, suppose we want to estimate 400 parameters on 320 training examples. As shown in Figure \ref{example}, we have a parameter server shared by four workers, while each worker also contains 4 worker threads. Then each worker thread is only responsible for updating 100 parameters using its assigned 80 training examples. In a typical round, if a work discovers that some of its worker threads are $s$ iterations behind (or beyond), the worker is required to synchronize with the parameter server, and force all the worker threads to update accordingly. Convergence is guaranteed by this SSP model, as proved in [1] [2] [9].
 
-Our method can be regarded as a variant of Shotgun[13], a parallelized method of Shooting[14] algorithom. The main differences are: 1) we update global parameters asychronously; 2) each worker thread updates parameters using only a subset of the training data; 3) each worker thread is responsible for a subset of the parameters. (The first two differences origin from the design philosophy of Petuum. The key idea of Petuum is a distributed system with relaxed consistency models, which supports asychronized updating global parameters. The third difference is because we want to control the worst case penalty. The less weights can be handled by one thread, the more threads we need. If we have more threads, if the worst case that every thread waits for the slowest thread happens, more computing power will be wasted. So we decided to bind several weights to one thread instead of one).
-
+Our method can be regarded as a variant of Shotgun[13], a parallelized method of Shooting[14] algorithom. The main differences are: 1) we update global parameters asychronously; 2) each worker thread updates parameters using only a subset of the training data; 3) each worker thread is responsible for a subset of the parameters. 
 
 \section{Experiments}
 \label{others}
-We will use a Wikipedia dataset that has 3 million instances, as suggested by the TA (Dani). We will also randomly generate a number of small samples from the original data set for testing and debugging purpose. For evaluation, we will first run the logistic regression using a single thread on a single machine, so that it gives us the baseline of converge time for a certain accuracy because there is no consistency issue (i.e. update conflicts) related. We will then run the LR using multi-threads (one thread per core) to simulate the distributed environment. We will plot the converge time against the number of threads (cores), and we anticipate to see a close-to-linear speed up as the number of threads go up.
+We will use UCI Pima Indians Diabetes datasets [17] in the LIBSVM [18] format for testing and debugging purpose.
+We will also use a Wikipedia dataset that has 3 million instances, as suggested by the TA (Dani). For evaluation, we will first run the logistic regression using a single thread on a single machine, so that it gives us the baseline of converge time for a certain accuracy because there is no consistency issue (i.e. update conflicts) related. We will then run the LR using multi-threads (one thread per core) to simulate the distributed environment. We will plot the converge time against the number of threads (cores), and we anticipate to see a close-to-linear speed up as the number of threads goes up.
 
 If time and resource permit, we will set up our system on a public cluster (e.g. Amazon EC2) and test on the huge original dataset to obtain a more real and accurate performance measure.
 
@@ -237,6 +236,10 @@ If time and resource permit, we will set up our system on a public cluster (e.g.
 [15] Schmidt, M., Fung, G., \& Rosales, R. (2007). Fast optimization methods for l1 regularization: A comparative study and two new approaches. In Machine Learning: ECML 2007 (pp. 286-297). Springer Berlin Heidelberg.
 
 [16] Shalev-Shwartz S., Tewari A.. 2011. Stochastic Methods for l1-regularized Loss Minimization. J. Mach. Learn. Res. 12 (July 2011), 1865-1892.
+
+[17] Bache, K. \& Lichman, M. (2013). UCI Machine Learning Repository [http://archive.ics.uci.edu/ml]. Irvine, CA: University of California, School of Information and Computer Science.
+
+[18] Chih-Chung Chang and Chih-Jen Lin, LIBSVM : a library for support vector machines. ACM Transactions on Intelligent Systems and Technology, 2:27:1--27:27, 2011. Software available at http://www.csie.ntu.edu.tw/~cjlin/libsvm. 
 }
 
 \end{document}
