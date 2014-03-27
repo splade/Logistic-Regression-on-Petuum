@@ -61,6 +61,8 @@ Address \\
 
 \begin{abstract}
 
+In this project, we present our open source implementation of large-scale L1-regularized and L2-regularized logistic regression (LR) via a stale synchronous parallel parameter server based on Petuum [5]. Algorithm-wisely, we use stochastic gradient descent (SGD) to solve L2-regularized LR and subgradient method to solve L1-regularized LR. System-wisely, we address three pratical issues that are critical to good performance: sparsity, scalability and adaptiveness. We leverage a shared parameter server offered by Petuum to parallelize computation and the Stale Synchronous Parallel (SSP) model to guarantee convergence. Experement results show that ...
+
 \end{abstract}
 
 \section{Introduction}
