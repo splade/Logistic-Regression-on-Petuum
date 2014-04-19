@@ -49,7 +49,7 @@ class LRL2Solver {
 		  std::vector<int32_t>& Y);
 
     void SolveOne(int32_t data_idx);
-    void SolveBatch(int32_t data_idx);
+    int32_t SolveBatch(int32_t local_idx);
     void SolveBatchPartialWeights(int32_t data_idx);
 
     float EvaluateObjLoc();

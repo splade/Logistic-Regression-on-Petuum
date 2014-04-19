@@ -83,17 +83,18 @@ void LRL2Solver::Solve() {
   //training
   for(int iter = 0; iter < max_iter && !converged; iter++){
     //TODO:replace with batch, partial weights in the future
-    int data_idx = rand() % (idx_end - idx_begin) + idx_begin;
-    SolveOne(data_idx);
+    //int data_idx = rand() % (idx_end - idx_begin) + idx_begin;
+    int local_idx = rand() % (idx_end - idx_begin);
+    //SolveOne(data_idx);
+    SolveBatch(local_idx);
     _table_group->Iterate();
-
 
     // Compute objective
     if (iter % _config.eval_interval == 0) {
       if (_config.client_rank == 0 &&
           _solver_thread_data->thread_id == 0) {
         // Global head.
-        LOG(INFO) << "Taking snapshot for outer iter = " << iter;
+        //LOG(INFO) << "Taking snapshot for outer iter = " << iter;
       }
       EvaluateObjDist(evaluation_count);
       if (_solver_thread_data->data_idx_begin == 0) {
@@ -149,10 +150,10 @@ void LRL2Solver::ReadData(const std::string& data_file,
   CHECK_NOTNULL(data_stream);
   LOG(INFO) << "Reading from data file " << data_file;
   int num_data = 0;
-  //int aug_dim_ = DATA_DIM + 1;
-  //int max_feature_id = 0;
+
   bool convert_label_notice = false;
   while (getline(&line, &num_bytes, data_stream) != -1) {
+    //LOG(INFO) << line;
     // stat of a word
     int32_t label, feature_id;
     float feature_val;
@@ -178,18 +179,21 @@ void LRL2Solver::ReadData(const std::string& data_file,
       while (*ptr != ' ') ++ptr; // goto next space
       // read a feature_id:feature_val pair
       sscanf(++ptr, "%d:%f", &feature_id, &feature_val);
+    //LOG(INFO) << feature_id << " "<<feature_val;
       //max_feature_id = std::max(feature_id, max_feature_id);
       datum[feature_id] = feature_val;
       while (*ptr != ' ' && *ptr != '\n') ++ptr; // goto next space or \n
     }
+    //LOG(INFO) << "read one line!";
     X.push_back(datum);
     ++num_data;
-    LOG_IF(INFO, num_data % 100000 == 0) << "Read data " << _num_data;
+    //LOG_IF(INFO, num_data % 100000 == 0) << "Read data " << _num_data;
   }
   //LOG(INFO) << "max_feature_id = " << max_feature_id;
   free(line);
   CHECK_EQ(0, fclose(data_stream)) << "Failed to close file " << data_file;
 
+  _num_data = num_data;
   LOG(INFO) << "Read " << _num_data << " data from " << data_file;
 }
 
@@ -226,8 +230,31 @@ void LRL2Solver::SolveOne(int32_t data_idx) {
   //LOG(INFO)<<"end solveone";
 }
 
-void LRL2Solver::SolveBatch(int32_t data_idx) {
+int32_t LRL2Solver::SolveBatch(int32_t local_idx) {
+  //LOG(INFO)<<"begin solveone";
+  petuum::DenseRow<float>& w_row = _w_table->GetRowUnsafe(0);
+  std::valarray<float> w(_aug_dim);
+  for (int i = 0; i < _aug_dim; i++){
+    w[i] = w_row[i];
+  }
+  std::valarray<float> grad(w.size());
 
+  int size = _solver_thread_data->data_idx_end - _solver_thread_data->data_idx_begin;
+  for (int i = 0; i < _config.batch_size; i++){
+    local_idx = (local_idx++) % size;
+    int32_t data_idx = local_idx + _solver_thread_data->data_idx_begin;
+    float sig = sigmoid(_X[data_idx], w, _Y[data_idx]);
+    grad += (sig - 1.f) * (float)(_Y[data_idx]) * _X[data_idx];
+  }
+  grad += _lambda * w;
+  grad *= _stepsize;
+
+  //Update weights
+  for (int i = 0; i < _aug_dim; i++){
+    _w_table->Inc(0, i, -grad[i]);
+  }
+
+  return local_idx;
 }
 
 void LRL2Solver::SolveBatchPartialWeights(int32_t data_idx) {

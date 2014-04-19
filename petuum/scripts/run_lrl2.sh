@@ -53,7 +53,7 @@ for ip in $host_list; do
     --test_data_file=$project_root/$test_data_path \
     --client_rank=$client_rank \
     --data_global_idx_begin=0 \
-    --aug_dim=15 \
+    --aug_dim=124 \
     --eval_interval=$eval_interval \
     --lambda=$lambda \
     --stepsize=$stepsize \

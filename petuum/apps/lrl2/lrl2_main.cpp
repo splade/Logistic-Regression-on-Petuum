@@ -42,7 +42,8 @@ int main(int argc, char* argv[]) {
 
   LOG(INFO) << "LRL2 started on client " << FLAGS_client_id
     << " server_file: " << FLAGS_server_file
-    << " num threads: " << FLAGS_num_threads;
+    << " num threads: " << FLAGS_num_threads
+    << " num cols: " << FLAGS_aug_dim;
 
   //CHECK_GT(FLAGS_num_data, 0);
   CHECK_GT(FLAGS_aug_dim, 1);
