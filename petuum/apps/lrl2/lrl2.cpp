@@ -87,6 +87,7 @@ void LRL2Solver::Solve() {
     int local_idx = rand() % (idx_end - idx_begin);
     //SolveOne(data_idx);
     SolveBatch(local_idx);
+    //SolveBatchPartialWeights(local_idx);
     _table_group->Iterate();
 
     // Compute objective
@@ -241,10 +242,10 @@ int32_t LRL2Solver::SolveBatch(int32_t local_idx) {
 
   int size = _solver_thread_data->data_idx_end - _solver_thread_data->data_idx_begin;
   for (int i = 0; i < _config.batch_size; i++){
-    local_idx = (local_idx++) % size;
     int32_t data_idx = local_idx + _solver_thread_data->data_idx_begin;
     float sig = sigmoid(_X[data_idx], w, _Y[data_idx]);
     grad += (sig - 1.f) * (float)(_Y[data_idx]) * _X[data_idx];
+    local_idx = (++local_idx) % size;
   }
   grad += _lambda * w;
   grad *= _stepsize;
@@ -257,8 +258,49 @@ int32_t LRL2Solver::SolveBatch(int32_t local_idx) {
   return local_idx;
 }
 
-void LRL2Solver::SolveBatchPartialWeights(int32_t data_idx) {
+int32_t LRL2Solver::SolveBatchPartialWeights(int32_t local_idx) {
   //TODO:scatter and gather, only handle one part of weights
+
+  int weight_dim = 32;
+  std::vector<int> loc = std::vector<int>(_aug_dim);
+  for(int i = 0; i<_aug_dim; i++)
+    loc[i] = i;
+
+  //shuffle, weights index are in  loc[_aug_dim-weight_dim, _aug_dim-1]
+  for(int i = 0; i<weight_dim; i++) {
+    int index = rand() % (_aug_dim - i);
+    int tmp = loc[_aug_dim - i - 1];
+    loc[_aug_dim - i - 1] = loc[index];
+    loc[index] = tmp;
+  }
+  
+  petuum::DenseRow<float>& w_row = _w_table->GetRowUnsafe(0);
+  std::valarray<float> w(_aug_dim);
+  for (int i = 0; i < _aug_dim; i++){
+    w[i] = w_row[i];
+  }
+  float *grad_active = new float[weight_dim]();
+  
+  int size = _solver_thread_data->data_idx_end - _solver_thread_data->data_idx_begin;
+  for (int i = 0; i < _config.batch_size; i++){
+    int32_t data_idx = local_idx + _solver_thread_data->data_idx_begin;
+    float sig = sigmoid(_X[data_idx], w, _Y[data_idx]);
+    for (int j = 0; j < weight_dim; j++) 
+      grad_active[j] += (sig - 1.f) * (float)(_Y[data_idx]) * _X[data_idx][loc[_aug_dim - j - 1]];
+    local_idx = (++local_idx) % size;
+  }
+  for (int j = 0; j < weight_dim; j++){ 
+    grad_active[j] += w[loc[_aug_dim - j - 1]] * _lambda;
+    grad_active[j] *= _stepsize;
+  }
+
+  for (int j = 0; j < weight_dim; j++){
+    _w_table->Inc(0, loc[_aug_dim - j - 1], -grad_active[j]);
+  }
+  
+  //TODO: donot new/delete this
+  delete grad_active;
+  return local_idx;
 }
 
 void LRL2Solver::EvaluateObjDist(int evaluation_count) {

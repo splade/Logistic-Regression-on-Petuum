@@ -50,7 +50,7 @@ class LRL2Solver {
 
     void SolveOne(int32_t data_idx);
     int32_t SolveBatch(int32_t local_idx);
-    void SolveBatchPartialWeights(int32_t data_idx);
+    int32_t SolveBatchPartialWeights(int32_t local_idx);
 
     float EvaluateObjLoc();
 
