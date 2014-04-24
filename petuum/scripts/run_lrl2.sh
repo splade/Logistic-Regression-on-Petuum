@@ -41,7 +41,7 @@ for ip in $host_list; do
   else
     head_client=0
   fi
-  sshpass -p 111 ssh $ip \
+  ssh $ip \
     LD_LIBRARY_PATH=$third_party_lib:${LD_LIBRARY_PATH} GLOG_logtostderr=true \
     GLOG_v=-1  GLOG_vmodule="" \
     $lrl2_path \
